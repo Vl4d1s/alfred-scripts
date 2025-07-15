@@ -3,58 +3,70 @@
 import os
 import sys
 import argparse
-from dotenv import load_dotenv  # For .env support
+import re
+from dotenv import load_dotenv
 from openai import OpenAI
 
-# Load environment variables from .env file if present
 load_dotenv()
+
+def get_system_prompt() -> str:
+    """Get unified system prompt for translation and correction."""
+    return (
+        "You are a professional translator and editor. "
+        "If the input contains Hebrew text, translate it to natural, fluent English. "
+        "If the input is English with typos or grammar errors, correct and improve it. "
+        "If the input contains both Hebrew and English, translate the Hebrew parts to English and correct the English parts. "
+        "Always output in English only. "
+        "Preserve the original meaning and tone. "
+        "Keep any @mentions, formatting, or code unchanged. "
+        "Only return the corrected/translated text without any prefix or explanation."
+    )
+
+def process_text(text: str, client: OpenAI) -> str:
+    """Process text for translation and correction."""
+    system_prompt = get_system_prompt()
+    user_prompt = f"Process this text (translate Hebrew to English and/or correct English):\n\n{text}"
+    
+    max_tokens = min(len(text) * 3, 2000)
+    
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        max_tokens=max_tokens,
+        temperature=0.2,
+        top_p=1.0
+    )
+    
+    return response.choices[0].message.content.strip() if response.choices[0].message.content else ""
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Correct and improve English grammar using OpenAI GPT-3.5-turbo."
+        description="Translate Hebrew to English and/or correct English text using OpenAI GPT-4o-mini."
     )
     parser.add_argument(
         "text",
         type=str,
-        help="Text to correct and improve. Enclose in quotes if it contains spaces.",
+        help="Text to translate or correct. Enclose in quotes if it contains spaces."
     )
+    
     args = parser.parse_args()
-
+    
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         print("ERROR: OPENAI_API_KEY environment variable not set.", file=sys.stderr)
         sys.exit(1)
-
+    
     client = OpenAI(api_key=api_key)
-
+    
     try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a helpful assistant that helps users to correct grammar mistakes, typos, factual errors, translate and improve their text. "
-                        "Please generate text when the user asks for help. Write in Markdown format and keep Slack mentions (@user) intact. "
-                        "Do not fix any code but add new lines where necessary. Only reply with the corrected text; witout any prefix."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"correct and improve the following text to standard English:\nText: {args.text}\n",
-                },
-            ],
-            max_tokens=2000,
-            temperature=0.5,
-            top_p=1,
-            frequency_penalty=1.3,
-            presence_penalty=1.3,
-        )
-        print(response.choices[0].message.content, end="")
+        result = process_text(args.text, client)
+        print(result)
     except Exception as e:
-        print("ERROR:", str(e), file=sys.stderr)
+        print(f"ERROR: {str(e)}", file=sys.stderr)
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main() 
